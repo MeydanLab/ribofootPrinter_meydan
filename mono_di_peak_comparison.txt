@@ -1,0 +1,22 @@
+# Input file for shared-site peak comparison (two datasets).
+
+# Comma-separated list of exactly two pkl.gzip files.
+INPUT_picklenames
+/Users/marksjp/Documents/Codex_ribofootprinter/Example files/SM147F_25to34nt.pkl.gzip,/Users/marksjp/Documents/Codex_ribofootprinter/Example files/SM147Fd_54to68nt.pkl.gzip
+
+# Offsets for the two files above, comma-separated in the same order.
+# Leave blank to be prompted interactively.
+INPUT_offsets
+
+# Optional per-file cutoffs in file order (monosome,disome).
+# Example: 2,3
+INPUT_cutoffs
+2,2
+
+# Optional shared cutoff fallback (used only if INPUT_cutoffs is blank).
+INPUT_cutoff
+2
+
+# Output csv path (with or without .csv).
+INPUT_outfile
+/Users/marksjp/Documents/Codex_ribofootprinter/Example files/SM147F_vs_SM147Fd_shared_peaks

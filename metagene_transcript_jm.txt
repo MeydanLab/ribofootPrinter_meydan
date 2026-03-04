@@ -1,0 +1,56 @@
+# Input file for transcript-wide metagene output.
+# Output columns: region, region_position, metagene_position, and one column per input dataset.
+
+INPUT_picklenames
+/Volumes/My Passport for Mac/ML008_009_reanalysis/ML009_1/JM011F_23to32nt_trim2.pkl.gzip,/Volumes/My Passport for Mac/ML008_009_reanalysis/ML009_1/JM012F_23to32nt_trim2.pkl.gzip,/Volumes/My Passport for Mac/ML008_009_reanalysis/ML009_1/JM013F_23to32nt_trim2.pkl.gzip,/Volumes/My Passport for Mac/ML008_009_reanalysis/ML009_1/JM014F_23to32nt_trim2.pkl.gzip,/Volumes/My Passport for Mac/ML008_009_reanalysis/ML009_1/JM015F_23to32nt_trim2.pkl.gzip,/Volumes/My Passport for Mac/ML008_009_reanalysis/ML009_1/JM016F_23to32nt_trim2.pkl.gzip
+INPUT_outfile
+/Volumes/My Passport for Mac/ML008_009_reanalysis/ML009_1/_metagene_transcript_JM011Fto16F_23to32nt_trim2_
+
+INPUT_endmode
+all_5
+
+INPUT_equalweighting
+1
+
+INPUT_genethresh
+1
+
+INPUT_read_offset5
+11
+
+INPUT_bins5
+100
+
+INPUT_binscds
+300
+
+INPUT_bins3
+100
+
+# =========================
+# Aggregation/Normalization Mode Selection
+# =========================
+# 0 = current settings (legacy mean)
+# 1 = exclude listed genes + mean
+# 2 = winsorized mean
+# 3 = median (DEFAULT)
+# 4 = trimmed mean
+# 5 = log-mean
+# 6 = robust within-gene scaling + mean
+INPUT_aggregation_option
+2
+
+# default mean option
+INPUT_mean_option
+1
+
+INPUT_exclude_genes
+
+INPUT_winsor_percentile
+99
+
+INPUT_trim_fraction
+0.1
+
+INPUT_robust_method
+mad

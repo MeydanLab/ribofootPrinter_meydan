@@ -1,11 +1,90 @@
-from Bio import SeqIO
-from Bio import Seq
+try:
+	from Bio import SeqIO
+	from Bio import Seq
+except ImportError:
+	SeqIO=None
+	Seq=None
 import csv
 import pickle
 import os
 import struct
 import re
 import gzip
+import gc
+import math
+from itertools import zip_longest
+
+AA_MOTIFS=["A","C","D","E","F","G","H","I","K","L","M","N","P","Q","R","S","T","V","W","Y"]
+NT_BASES=["A","C","G","T"]
+NT_CODONS=["AAA","AAC","AAG","AAT","ACA","ACC","ACG","ACT","AGA","AGC","AGG","AGT","ATA","ATC","ATG","ATT","CAA","CAC","CAG","CAT","CCA","CCC","CCG","CCT","CGA","CGC","CGG","CGT","CTA","CTC","CTG","CTT","GAA","GAC","GAG","GAT","GCA","GCC","GCG","GCT","GGA","GGC","GGG","GGT","GTA","GTC","GTG","GTT","TAA","TAC","TAG","TAT","TCA","TCC","TCG","TCT","TGA","TGC","TGG","TGT","TTA","TTC","TTG","TTT"]
+
+
+def expand_wildcard_motif(motif,alphabet):
+	expanded=[""]
+	for character in motif:
+		if character=="X":
+			expanded=[prefix+base for prefix in expanded for base in alphabet]
+		else:
+			expanded=[prefix+character for prefix in expanded]
+	return expanded
+
+
+def resolve_posavg_motifs(motif_input,kind,mode):
+	kind=int(kind)
+	mode=mode.lower()
+	motif_input=motif_input.strip()
+	compute_scores=False
+
+	# Classic mode preserves legacy behavior exactly.
+	if mode=="classic":
+		if motif_input=="all":
+			compute_scores=True
+			if kind==0:
+				# Keep legacy codon list behavior.
+				motifs=["AAA","AAG","AAC","AAT","AGA","AGG","AGC","AGT","ACA","ACG","ACC","ACT","ATA","ATG","ATC","ATT","GAA","GAG","GAC","GAT","GGA","GGG","GGC","GGT","GCA","GCG","GCC","GCT","GTA","GTG","GTC","GTT","CAA","CAG","CAC","CAT","CGA","CGG","CGC","CGT","CCA","CCG","CCC","CCT","CTA","CTG","CTC","CTT","TAA","TAG","TAC","TAT","TGA","TGG","TGC","TGT","TCA","TCG","TCC","TCT","TTA","TTG","TTC","TTT","TAA","TAG","TGA"]
+			elif kind==1:
+				motifs=AA_MOTIFS
+			else:
+				exit()
+		else:
+			motifs=list(motif_input.split(","))
+		return motifs,compute_scores
+
+	# Expanded mode adds wildcard support and score output for expanded sets.
+	if motif_input=="all":
+		compute_scores=True
+		if kind==0:
+			return NT_CODONS,compute_scores
+		if kind==1:
+			return AA_MOTIFS,compute_scores
+		exit()
+
+	raw_motifs=[item.strip().upper() for item in motif_input.split(",") if item.strip()!=""]
+	motifs=[]
+	seen=set()
+
+	for motif in raw_motifs:
+		if kind==0 and "X" in motif:
+			if len(motif)!=3:
+				print("Expanded codon mode requires 3-nt motifs when using X wildcard.")
+				exit()
+			compute_scores=True
+			for expanded in expand_wildcard_motif(motif,NT_BASES):
+				if expanded not in seen:
+					motifs.append(expanded)
+					seen.add(expanded)
+		elif kind==1 and "X" in motif:
+			compute_scores=True
+			for expanded in expand_wildcard_motif(motif,AA_MOTIFS):
+				if expanded not in seen:
+					motifs.append(expanded)
+					seen.add(expanded)
+		else:
+			if motif not in seen:
+				motifs.append(motif)
+				seen.add(motif)
+
+	return motifs,compute_scores
 
 
 
@@ -84,23 +163,15 @@ def writegene2_m(genenames,endmode,picklefile,outfile):
 	transposecsv(outfile)	
 	
 def transposecsv(csvfile):
-	writerfile=open(csvfile+"_transposed.csv", "w")
-	writer = csv.writer(writerfile,delimiter=',')
 	f=open(csvfile+".csv")
 	readercsv=csv.reader(f)
-	maxrow=0
-	for row in readercsv:
-		if len(row)>maxrow:
-			maxrow=len(row)
-	
-	columnnum=maxrow
-	for column in range(columnnum):
-		f.close() 
-		f=open(csvfile+".csv")
-		readercsv=csv.reader(f)
-		col=extractcolumn(readercsv,column)
-		writer.writerow(col)
+	rows=[row for row in readercsv]
 	f.close()
+
+	writerfile=open(csvfile+"_transposed.csv", "w")
+	writer = csv.writer(writerfile,delimiter=',')
+	for col in zip_longest(*rows, fillvalue=float('nan')):
+		writer.writerow(col)
 	writerfile.close()
 	os.remove(csvfile+".csv")
 	os.rename(csvfile+"_transposed.csv",csvfile+".csv")
@@ -151,58 +222,80 @@ def posavg_m_wrapper(txtinfile):
 	
 	
 	inputfiles=list(variables["picklenames"].split(","))
-	
-
-	if variables["motif"]=="all":			# This will do all aas or triplets, and compute pause scores in addition to averages.
-		pausescores=[]		
-		filenames=[]
-		motifused=[]
-		
-		if variables["kind"]=="0":
-			motifs=["AAA","AAG","AAC","AAT","AGA","AGG","AGC","AGT","ACA","ACG","ACC","ACT","ATA","ATG","ATC","ATT","GAA","GAG","GAC","GAT","GGA","GGG","GGC","GGT","GCA","GCG","GCC","GCT","GTA","GTG","GTC","GTT","CAA","CAG","CAC","CAT","CGA","CGG","CGC","CGT","CCA","CCG","CCC","CCT","CTA","CTG","CTC","CTT","TAA","TAG","TAC","TAT","TGA","TGG","TGC","TGT","TCA","TCG","TCC","TCT","TTA","TTG","TTC","TTT"]
-		elif variables["kind"]=="1":
-			motifs=["A","C","D","E","F","G","H","I","K","L","M","N","P","Q","R","S","T","V","W","Y"]
-		else:
-			exit()
-			
-	else:
-		motifs=list(variables["motif"].split(","))
+	mode=variables.get("posavgmode","classic")
+	motifs,compute_scores=resolve_posavg_motifs(variables["motif"],variables["kind"],mode)
+	pause_scores_by_dataset={}
+	dataset_labels=[re.split("[./]",picklefile)[-3] for picklefile in inputfiles]
+	for dataset_label in dataset_labels:
+		pause_scores_by_dataset[dataset_label]={}
 		
 	
 	# Do score and average data.
-		
 	writerfile=open(variables["outfile"]+"_avgdata.csv", "w")	# Note no "b" in python 3!
 	writer = csv.writer(writerfile)
-	
-	for motif in motifs:
-		
-		for picklefile in inputfiles:
-			avggene=posavg_m(variables["endmode"],picklefile,variables["outfile"]+"_"+motif+"_"+re.split("[./]",picklefile)[-3],motif,variables["kind"],variables["frame"],variables["bkndwindowthresh"],variables["bkndwindow"],variables["ORFnorm"],variables["UTRmode"],variables["shift"])
-		
-			#Compute pause score
-			if variables["motif"]=="all":	
-				bkndwindow=int(variables["bkndwindow"])
-				num=sum(avggene[bkndwindow-1:bkndwindow+2])/3		# assume a peak of 3 nt.
-				denom=sum(avggene)/len(avggene)	
-				pausescores.append(num/denom)
-				filenames.append(re.split("[./]",picklefile)[-3])
-				motifused.append(motif)
+
+	batch_size=3
+	for batch_start in range(0,len(inputfiles),batch_size):
+		batch_files=inputfiles[batch_start:batch_start+batch_size]
+		footprints_cache={}
+		results_by_pickle={}
+
+		for picklefile in batch_files:
+			f=gzip.open(picklefile,"rb")
+			footprints_cache[picklefile]=pickle.load(f)
+			print("Data loaded for "+picklefile)
+			f.close()
+			results_by_pickle[picklefile]=posavg_m_multi(
+				variables["endmode"],
+				picklefile,
+				variables["outfile"],
+				motifs,
+				variables["kind"],
+				variables["frame"],
+				variables["bkndwindowthresh"],
+				variables["bkndwindow"],
+				variables["ORFnorm"],
+				variables["UTRmode"],
+				variables["shift"],
+				footprints=footprints_cache[picklefile],
+			)
+
+		for motif in motifs:
+			for picklefile in batch_files:
+				avggene=results_by_pickle[picklefile][motif]
+				dataset_label=re.split("[./]",picklefile)[-3]
 			
-			writer.writerow([re.split("[./]",picklefile)[-3]+"_"+motif]+avggene)
+				#Compute pause score
+				if compute_scores:	
+					bkndwindow=int(variables["bkndwindow"])
+					num=sum(avggene[bkndwindow-1:bkndwindow+2])/3		# assume a peak of 3 nt.
+					denom=sum(avggene)/len(avggene)	
+					if denom==0:
+						pause_scores_by_dataset[dataset_label][motif]=float('nan')
+					else:
+						pause_scores_by_dataset[dataset_label][motif]=num/denom
+				
+				writer.writerow([dataset_label+"_"+motif]+avggene)
+
+		del results_by_pickle
+		del footprints_cache
+		gc.collect()
 		
 	writerfile.close()
 	transposecsv(variables["outfile"]+"_avgdata")		
 	
 	
 	# Score data not written out unless doing all. There's not really a reason to do just one score.
-	if variables["motif"]=="all":		
+	if compute_scores:		
 		writerfile=open(variables["outfile"]+"_score.csv", "w")	
 		writer = csv.writer(writerfile)
-		writer.writerow(filenames)
-		writer.writerow(motifused)
-		writer.writerow(pausescores)
+		writer.writerow(["dataset"]+motifs)
+		for dataset_label in dataset_labels:
+			row=[dataset_label]
+			for motif in motifs:
+				row.append(pause_scores_by_dataset[dataset_label].get(motif,float('nan')))
+			writer.writerow(row)
 		writerfile.close()
-		transposecsv(variables["outfile"]+"_score")	
 
 	
 	
@@ -227,14 +320,30 @@ def posavg_m_wrapper(txtinfile):
 # shift is nt to shift data for site of interest (P site, A site, etc).
 # Pause score is computed from the average plot, uses a hardcoded window of +/- 1 nt around the peak.
 # There is a hard-coded requirement that for ORFnorm, the UTR region cannot be >10x the ORF. 
-def posavg_m(endmode,picklefile,outfile,motif,kind,frame,bkndwindowthresh,bkndwindow,ORFnorm,UTRmode,shift):
-	
-	
-	f=gzip.open(picklefile,"rb")
-	footprints=pickle.load(f)
-	print("Data loaded.")
-	f.close()
+def posavg_m(endmode,picklefile,outfile,motif,kind,frame,bkndwindowthresh,bkndwindow,ORFnorm,UTRmode,shift,footprints=None):
+	averages=posavg_m_multi(
+		endmode,
+		picklefile,
+		outfile,
+		[motif],
+		kind,
+		frame,
+		bkndwindowthresh,
+		bkndwindow,
+		ORFnorm,
+		UTRmode,
+		shift,
+		footprints=footprints,
+	)
+	return(averages[motif])
 
+
+def posavg_m_multi(endmode,picklefile,outfile,motifs,kind,frame,bkndwindowthresh,bkndwindow,ORFnorm,UTRmode,shift,footprints=None):
+	if footprints is None:
+		f=gzip.open(picklefile,"rb")
+		footprints=pickle.load(f)
+		print("Data loaded.")
+		f.close()
 
 	kind=int(kind)
 	frame=int(frame)
@@ -248,38 +357,48 @@ def posavg_m(endmode,picklefile,outfile,motif,kind,frame,bkndwindowthresh,bkndwi
 		print("Invalid entries. Spike checking prevents iORF usage with ORF norm.")
 		exit()
 
+	motif_meta=[]
+	for motif_raw in motifs:
+		firstlast=0
+		motif=motif_raw
+		if motif[0]=="f":
+			motif=motif[1:]
+			firstlast=1
+		elif motif[0]=="l":
+			motif=motif[1:]
+			firstlast=2
+		if firstlast>0 and kind!=0:
+			print("Invalid use of firstlast on an amino acid motif. Nucleotide only.")
+			exit()
+		motif_meta.append({"raw":motif_raw,"motif":motif,"firstlast":firstlast,"motiflen":len(motif)})
 
+	normal_motif_lookup={}
+	firstlast_metas=[]
+	for meta in motif_meta:
+		if kind==0 and meta["firstlast"]>0:
+			firstlast_metas.append(meta)
+			continue
+		motiflen=meta["motiflen"]
+		motif=meta["motif"]
+		if motiflen not in normal_motif_lookup:
+			normal_motif_lookup[motiflen]={}
+		if motif not in normal_motif_lookup[motiflen]:
+			normal_motif_lookup[motiflen][motif]=[]
+		normal_motif_lookup[motiflen][motif].append(meta)
 
-	firstlast=0		# Set to 1 if doing first only; 2 if last only. Note this will check all frames.
-	if motif[0]=="f":
-		motif=motif[1:]
-		firstlast=1
-	elif motif[0]=="l":
-		motif=motif[1:]
-		firstlast=2
-	if firstlast>0 and kind!=0:
-		print("Invalid use of firstlast on an amino acid motif. Nucleotide only.")
-		exit()
+	averages={meta["raw"]:[0.0 for x in range(2*bkndwindow)] for meta in motif_meta}
+	counts_by_motif={meta["raw"]:0 for meta in motif_meta}
 
-
-	count=0
-	i=0
-	motiflen=len(motif)
-	averagegene=[0 for x in range(2*bkndwindow)]
-	
-	
 	if frame==3:
 		framelist=[0,1,2]
 	else:
 		framelist=[frame]
-			
+
 	for frame in framelist:
 		genecount=0
 		print("Frame "+str(frame))
 
 		for gene in footprints.keys():
-			#if gene=="ENSG00000242485.5":
-			#	continue	# Skip MRPL20 - weird stuff. This was for old gencode system.
 			if gene=="NM_020791.2":
 				continue
 			if genecount%9000==0:
@@ -287,20 +406,17 @@ def posavg_m(endmode,picklefile,outfile,motif,kind,frame,bkndwindowthresh,bkndwi
 			genecount+=1
 			ORFstart=int(footprints[gene][3])
 			UTR3start=int(footprints[gene][4])
-		
-		
 
-			# For positive shifts:			
 			if shift>=0:
 				if UTRmode==0:
 					counts=footprints[gene][2][endmode][0:ORFstart-shift]
 					genesequence=footprints[gene][1][shift:ORFstart]
-					if (ORFstart-shift)<0:		# Check for negative indexes: 
+					if (ORFstart-shift)<0:
 						continue
 				elif UTRmode==1:
 					counts=footprints[gene][2][endmode][ORFstart-shift:UTR3start-shift]
 					genesequence=footprints[gene][1][ORFstart:UTR3start]
-					if (ORFstart-shift)<0 or (UTR3start-shift)<0:	# Check for negative indexes:
+					if (ORFstart-shift)<0:
 						continue
 				elif UTRmode==2:
 					if shift==0:
@@ -308,168 +424,139 @@ def posavg_m(endmode,picklefile,outfile,motif,kind,frame,bkndwindowthresh,bkndwi
 					else:
 						counts=footprints[gene][2][endmode][UTR3start-shift:-shift]
 					genesequence=footprints[gene][1][UTR3start:]
-					if (UTR3start-shift)<0:	# Check for negative indexes:
+					if (UTR3start-shift)<0:
 						continue
-		
-			# FOR negative SHIFTS (3' end aligned):
+
 			if shift<0:
 				if UTRmode==0:
 					counts=footprints[gene][2][endmode][-shift:ORFstart-shift]
 					genesequence=footprints[gene][1][0:ORFstart]
-					if (ORFstart-shift)>len(counts):		# Check for indexes off end:
+					if (ORFstart-shift)>len(counts):
 						continue
 				elif UTRmode==1:
 					counts=footprints[gene][2][endmode][ORFstart-shift:UTR3start-shift]
 					genesequence=footprints[gene][1][ORFstart:UTR3start]
-					if (ORFstart-shift)>len(counts) or (UTR3start-shift)>len(counts):	# Check for indexes off end:
+					if (ORFstart-shift)>len(counts) or (UTR3start-shift)>len(counts):
 						continue
 				elif UTRmode==2:
 					counts=footprints[gene][2][endmode][UTR3start-shift:]
 					genesequence=footprints[gene][1][UTR3start:shift]
-					if (UTR3start-shift)>len(counts):	# Check for indexes off end:
+					if (UTR3start-shift)>len(counts):
 						continue
 
-		
 			if len(counts)==0:
-				#Skip gene because shift isn't allowing us to get the full region.
 				continue
-			
+
 			if shift<0:
 				shift_loc=-13
 			else:
 				shift_loc=13
-			ORFlevel=(sum(footprints[gene][2][endmode][ORFstart-shift_loc:UTR3start-shift_loc]))/(UTR3start-ORFstart) #avg rpm per len level						
-		
-			# Set a value that helps to eliminate poorly annotated UTRs.
-			# Set the level at which ORFnorm no longer includes a 3'UTR. Typically this could be a UTR ORF that exceeds the main ORF.
-			#spikecheck=(1*ORFlevel)
+			ORFlevel=(sum(footprints[gene][2][endmode][ORFstart-shift_loc:UTR3start-shift_loc]))/(UTR3start-ORFstart)
 			spikecheck=(10*ORFlevel)
-			#spikecheck=1000000000000000000   # Essentially skips this.
-		
-			# Take out genes if ORFnorm is being used and you're reading off ends of lists:
+
 			if ORFnorm>0:
 				if shift<0:
 					if (ORFstart-shift_loc)>len(counts) or (UTR3start-shift_loc)>len(counts):
 						continue
 				if shift>=0:
-					if (ORFstart-shift_loc)<0 or (UTR3start-shift_loc)<0:	# Check for negative indexes:
+					if (ORFstart-shift_loc)<0 or (UTR3start-shift_loc)<0:
 						continue
-				if ((ORFlevel*1000)<ORFnorm): # rpkm conversion and check that ORF is over ORF thresh.
+				if ((ORFlevel*1000)<ORFnorm):
 					continue
-		
-			genelen=len(genesequence)
 
-			
-		# Find motifs of interest
-		
-		
-			i=frame
-			
+			def get_normfactor_and_check(counts_local,position_nt,genelen_local):
+				if not ((position_nt+bkndwindow)<genelen_local and (position_nt-bkndwindow)>0):
+					return(None)
+				bknd=counts_local[position_nt-bkndwindow:position_nt+bkndwindow]
+				if ((sum(bknd))/(len(bknd)/1000))<bkndwindowthresh:
+					return(None)
+				if ORFnorm==0:
+					normfactor=sum(bknd)/(len(bknd))
+				else:
+					normfactor=ORFlevel
+					if (sum(bknd))/(len(bknd))>=spikecheck:
+						return(None)
+				if normfactor<=0:
+					return(None)
+				return(normfactor)
+
 			if kind==0:
-				while (i+motiflen)<genelen: 
-					if motif==str(genesequence[i:i+motiflen]):
-						
-						if firstlast==1:	# Check if another instance before this starting just past first codon.
-							if motif in str(genesequence[1:i]):
-								i+=motiflen
-								continue
-						
-						
-						if firstlast==2:	# CHeck if another instance of motif is coming in any frame.
-							if motif in str(genesequence[i+1:]):
-								i+=motiflen
-								continue
-					
-						if (i+bkndwindow)<genelen and (i-bkndwindow)>0:
-							bknd=counts[i-bkndwindow:i+bkndwindow]
-							
-							if ((sum(bknd))/(len(bknd)/1000))<bkndwindowthresh:
-								i+=motiflen
-								continue
-								
-							if ORFnorm==0:
-								normfactor=sum(bknd)/(len(bknd))	#rpm per length units.
-							else:
-								normfactor=ORFlevel
-								if (sum(bknd))/(len(bknd))>=spikecheck:	# Spike check
-									i+=motiflen
-								#	print(gene) # For debugging.
-									continue
+				genesequence_nt=str(genesequence)
+				genelen=len(genesequence_nt)
+				for motiflen,motif_lookup in normal_motif_lookup.items():
+					i=frame
+					while (i+motiflen)<genelen:
+						token=genesequence_nt[i:i+motiflen]
+						if token in motif_lookup:
+							normfactor=get_normfactor_and_check(counts,i,genelen)
+							if normfactor is not None:
+								for meta in motif_lookup[token]:
+									averagegene=averages[meta["raw"]]
+									for j in range(len(averagegene)):
+										averagegene[j]+=((counts[i-bkndwindow+j])/normfactor)
+									counts_by_motif[meta["raw"]]+=1
+						i+=motiflen
 
-							if normfactor>0:		# Note this will allow 0-read genes for ORFnorm but not nonORFnorm
-								for j in range(len(averagegene)):
-									averagegene[j]+=((counts[i-bkndwindow+j])/normfactor)	
-								count+=1
-								# For debugging
-								#outputsite=[gene]+[i]+averagegene
-								#writer.writerow(outputsite)
-							else:
-								i+=motiflen
-								continue
-						else:
+				for meta in firstlast_metas:
+					i=frame
+					motif=meta["motif"]
+					motiflen=meta["motiflen"]
+					firstlast=meta["firstlast"]
+					averagegene=averages[meta["raw"]]
+					while (i+motiflen)<genelen:
+						if motif!=genesequence_nt[i:i+motiflen]:
 							i+=motiflen
 							continue
-					else:
+						if firstlast==1:
+							if motif in genesequence_nt[1:i]:
+								i+=motiflen
+								continue
+						if firstlast==2:
+							if motif in genesequence_nt[i+1:]:
+								i+=motiflen
+								continue
+						normfactor=get_normfactor_and_check(counts,i,genelen)
+						if normfactor is None:
+							i+=motiflen
+							continue
+						for j in range(len(averagegene)):
+							averagegene[j]+=((counts[i-bkndwindow+j])/normfactor)
+						counts_by_motif[meta["raw"]]+=1
 						i+=motiflen
-						continue	
-					i+=motiflen
 
 			elif kind==1:
-				i=0
-				counts=counts[frame:]		# Note that this loss here of a base or two on the end eliminates around 100 genes. 
-				genesequence=Seq.Seq(genesequence[frame:]).translate()
-				genelen_seq=len(genesequence)
-				genelen=len(counts)
-	
-				while (i+motiflen)<genelen_seq: 
-					if motif==str(genesequence[i:i+motiflen]):
-					
-						if (i*3+bkndwindow)<genelen and (i*3-bkndwindow)>0:
-							bknd=counts[i*3-bkndwindow:i*3+bkndwindow]
-						
-							if ((sum(bknd))/(len(bknd)/1000))<bkndwindowthresh:		
-								i+=motiflen
-								continue
-						
-							if ORFnorm==0:
-								normfactor=sum(bknd)/(len(bknd))			#rpm per length units.
-							else:
-								normfactor=ORFlevel
-								if (sum(bknd))/(len(bknd))>=spikecheck:	# Spike check 
-									i+=motiflen
-									continue
-								
-							if normfactor>0:	# Note this will allow 0-read genes for ORFnorm but not nonORFnorm
-						
-								for j in range(len(averagegene)):
-									averagegene[j]+=((counts[i*3-bkndwindow+j])/normfactor)
-								count+=1
-							else:
-								i+=motiflen
-								continue
-
-						else:
-							i+=motiflen
-							continue
-					else:
+				counts_frame=counts[frame:]
+				genesequence_aa=str(Seq.Seq(genesequence[frame:]).translate())
+				genelen_seq=len(genesequence_aa)
+				genelen=len(counts_frame)
+				for motiflen,motif_lookup in normal_motif_lookup.items():
+					i=0
+					while (i+motiflen)<genelen_seq:
+						token=genesequence_aa[i:i+motiflen]
+						if token in motif_lookup:
+							position_nt=i*3
+							normfactor=get_normfactor_and_check(counts_frame,position_nt,genelen)
+							if normfactor is not None:
+								for meta in motif_lookup[token]:
+									averagegene=averages[meta["raw"]]
+									for j in range(len(averagegene)):
+										averagegene[j]+=((counts_frame[position_nt-bkndwindow+j])/normfactor)
+									counts_by_motif[meta["raw"]]+=1
 						i+=motiflen
-						continue	
-					i+=motiflen
-		
 
-	if count==0:
-		print("Error 0 count")
-		quit()
-		
+	for meta in motif_meta:
+		motif_raw=meta["raw"]
+		count=counts_by_motif[motif_raw]
+		if count==0:
+			print("Error 0 count")
+			quit()
+		averagegene=averages[motif_raw]
+		for i in range(len(averagegene)):
+			averagegene[i]/=count
+		print("Number of positions in average")
+		print(count)
 
-	#Normalize:
-	for i in range(len(averagegene)):
-		averagegene[i]/=count
-
-		
-	print("Number of positions in average")
-	print(count)
-	return(averagegene)
+	return(averages)
 
 
 
@@ -761,6 +848,7 @@ def metagene_m(endmode,picklefile,kind,weighting,genethresh,range5,range3):
 		
 		ORFstart=int(footprints[gene][3])
 		UTR3start=int(footprints[gene][4])
+		stopcodon=footprints[gene][1][UTR3start-3:UTR3start]
 		
 		# For thresholding and equalweighting - assumes no end effects (typically 30 nt) on ends of genes and that shift is 13 roughly.
 		if (UTR3start-ORFstart)<=0 or ORFstart<13 or (len(footprints[gene][2][endmode])-UTR3start)<13:
@@ -781,12 +869,15 @@ def metagene_m(endmode,picklefile,kind,weighting,genethresh,range5,range3):
 			if (len(footprints[gene][2][endmode])-UTR3start)<range3 or (UTR3start-ORFstart)<range5:
 				continue
 			else:
-				tempmetagene=footprints[gene][2][endmode][UTR3start-range5:UTR3start+range3]
-				genecount+=1
-		
+				if stopcodon=="TAA":
+					tempmetagene=footprints[gene][2][endmode][UTR3start-range5:UTR3start+range3]
+					genecount+=1
+				else:
+					continue
+
 		else:
 			print("error")
-			
+					
 		for position in range(range5+range3):
 			if weighting==0:
 				growingmetagene[position]+=tempmetagene[position]
@@ -797,8 +888,303 @@ def metagene_m(endmode,picklefile,kind,weighting,genethresh,range5,range3):
 		growingmetagene[position]/=genecount
 		
 	print("Genes included = "+str(genecount))	
-	
 	return growingmetagene
+
+
+def metagene_transcript_m_wrapper(txtinfile):
+	f=open(txtinfile)
+	inputparams=[line.strip() for line in f.readlines()]
+	f.close()
+
+	variables={}
+	nextlineisinput=0
+	for inputline in inputparams:
+		if inputline=="":
+			if nextlineisinput!=0:
+				variables[nextlineisinput]=""
+				nextlineisinput=0
+			continue
+		if inputline[0]=="#":
+			continue
+		if inputline[0:5]=="INPUT":
+			if nextlineisinput!=0:
+				variables[nextlineisinput]=""
+			nextlineisinput=inputline[6:]
+			continue
+		if nextlineisinput!=0:
+			variables[nextlineisinput]=inputline
+			nextlineisinput=0
+	if nextlineisinput!=0:
+		variables[nextlineisinput]=""
+
+	print("Variables collected:")
+	for key in (variables.keys()):
+		print(key)
+		print(variables[key])
+		print("")
+
+	inputfiles=[x.strip() for x in variables["picklenames"].split(",") if x.strip()!=""]
+	outfile=variables["outfile"]
+
+	bins5=int(variables["bins5"])
+	binscds=int(variables["binscds"])
+	bins3=int(variables["bins3"])
+	aggregation_option=int(variables.get("aggregation_option","3"))
+	mean_option=int(variables.get("mean_option","1"))
+	exclude_gene_ids=set([x.strip() for x in variables.get("exclude_genes","").split(",") if x.strip()!=""])
+	winsor_percentile=float(variables.get("winsor_percentile","99"))
+	trim_fraction=float(variables.get("trim_fraction","0.1"))
+	robust_method=variables.get("robust_method","mad").strip().lower()
+
+	row_schema=[]
+	for i in range(bins5):
+		row_schema.append(("5'UTR",i+1))
+	for i in range(binscds):
+		row_schema.append(("CDS",i+1))
+	for i in range(bins3):
+		row_schema.append(("3'UTR",i+1))
+
+	data_by_dataset={}
+	dataset_labels=[]
+	for picklefile in inputfiles:
+		base=os.path.basename(picklefile)
+		label=re.sub(r"\.pkl\.gzip$","",base)
+		dataset_labels.append(label)
+		data_by_dataset[label]=metagene_transcript_m(
+			picklefile,
+			variables["endmode"],
+			variables["equalweighting"],
+			variables["genethresh"],
+			variables["read_offset5"],
+			bins5,
+			binscds,
+			bins3,
+			aggregation_option,
+			mean_option,
+			exclude_gene_ids,
+			winsor_percentile,
+			trim_fraction,
+			robust_method,
+		)
+
+	writerfile=open(outfile+".csv","w")
+	writer=csv.writer(writerfile)
+	writer.writerow(["region","region_position","metagene_position"]+dataset_labels)
+	start_to_cds_boundary=bins5+1
+	cds_to_3utr_boundary=bins5+binscds+1
+	print("Boundary 5'UTR->CDS at metagene_position="+str(start_to_cds_boundary))
+	print("Boundary CDS->3'UTR at metagene_position="+str(cds_to_3utr_boundary))
+	for idx,(site,position) in enumerate(row_schema):
+		row=[site,position,idx+1]
+		for label in dataset_labels:
+			row.append(data_by_dataset[label][idx])
+		writer.writerow(row)
+	writerfile.close()
+
+
+def _resample_region(counts,target_bins):
+	if target_bins<=0:
+		return []
+	if len(counts)==0:
+		return [0.0 for _ in range(target_bins)]
+	if len(counts)==1:
+		return [float(counts[0]) for _ in range(target_bins)]
+	if target_bins==1:
+		return [float(sum(counts))/len(counts)]
+	out=[]
+	oldmax=len(counts)-1
+	newmax=target_bins-1
+	for i in range(target_bins):
+		pos=(i*oldmax)/float(newmax)
+		left=int(pos)
+		right=min(left+1,oldmax)
+		frac=pos-left
+		out.append((1-frac)*float(counts[left])+frac*float(counts[right]))
+	return out
+
+
+def _shift_counts_5prime(counts,offset):
+	shifted=[0.0 for _ in range(len(counts))]
+	for idx,val in enumerate(counts):
+		newidx=idx+offset
+		if newidx>=0 and newidx<len(counts):
+			shifted[newidx]+=float(val)
+	return shifted
+
+
+def _percentile_from_sorted(sorted_vals,pct):
+	if len(sorted_vals)==0:
+		return 0.0
+	if pct<=0:
+		return float(sorted_vals[0])
+	if pct>=100:
+		return float(sorted_vals[-1])
+	pos=(pct/100.0)*(len(sorted_vals)-1)
+	left=int(pos)
+	right=min(left+1,len(sorted_vals)-1)
+	frac=pos-left
+	return (1-frac)*float(sorted_vals[left])+frac*float(sorted_vals[right])
+
+
+def _aggregate_gene_vectors(gene_vectors,total_len,aggregation_option,mean_option,winsor_percentile,trim_fraction):
+	# mean_option is reserved for future mean variants. Option 1 is arithmetic mean.
+	if mean_option!=1:
+		print("Warning: mean_option currently supports only option 1. Using option 1.")
+
+	out=[0.0 for _ in range(total_len)]
+	n=len(gene_vectors)
+	if n==0:
+		return out
+
+	for pos in range(total_len):
+		col=[gene_vectors[g][pos] for g in range(n)]
+		col.sort()
+
+		if aggregation_option in [0,1,6]:
+			out[pos]=sum(col)/len(col)
+		elif aggregation_option==2:
+			upper=_percentile_from_sorted(col,winsor_percentile)
+			lower=_percentile_from_sorted(col,max(0.0,100.0-winsor_percentile))
+			capped=[]
+			for val in col:
+				if val>upper:
+					capped.append(upper)
+				elif val<lower:
+					capped.append(lower)
+				else:
+					capped.append(val)
+			out[pos]=sum(capped)/len(capped)
+		elif aggregation_option==3:
+			mid=len(col)//2
+			if len(col)%2==1:
+				out[pos]=col[mid]
+			else:
+				out[pos]=(col[mid-1]+col[mid])/2.0
+		elif aggregation_option==4:
+			k=int(len(col)*trim_fraction)
+			if (2*k)>=len(col):
+				out[pos]=sum(col)/len(col)
+			else:
+				trimmed=col[k:len(col)-k]
+				out[pos]=sum(trimmed)/len(trimmed)
+		elif aggregation_option==5:
+			logvals=[math.log1p(max(0.0,v)) for v in col]
+			out[pos]=math.expm1(sum(logvals)/len(logvals))
+		else:
+			print("Warning: invalid aggregation_option "+str(aggregation_option)+". Using option 3 (median).")
+			mid=len(col)//2
+			if len(col)%2==1:
+				out[pos]=col[mid]
+			else:
+				out[pos]=(col[mid-1]+col[mid])/2.0
+
+	return out
+
+
+def _robust_scale_vector(vec,robust_method):
+	if len(vec)==0:
+		return vec
+	sorted_vals=sorted(vec)
+	mid=len(sorted_vals)//2
+	if len(sorted_vals)%2==1:
+		median=sorted_vals[mid]
+	else:
+		median=(sorted_vals[mid-1]+sorted_vals[mid])/2.0
+
+	if robust_method=="zscore":
+		mean=sum(vec)/len(vec)
+		var=sum([(x-mean)*(x-mean) for x in vec])/len(vec)
+		sd=math.sqrt(var)
+		if sd==0:
+			return [0.0 for _ in vec]
+		return [(x-mean)/sd for x in vec]
+
+	madvals=[abs(x-median) for x in vec]
+	madvals_sorted=sorted(madvals)
+	mid2=len(madvals_sorted)//2
+	if len(madvals_sorted)%2==1:
+		mad=madvals_sorted[mid2]
+	else:
+		mad=(madvals_sorted[mid2-1]+madvals_sorted[mid2])/2.0
+	scale=1.4826*mad
+	if scale==0:
+		return [0.0 for _ in vec]
+	return [(x-median)/scale for x in vec]
+
+
+def metagene_transcript_m(picklefile,endmode,equalweighting,genethresh,read_offset5,bins5,binscds,bins3,aggregation_option=3,mean_option=1,exclude_gene_ids=None,winsor_percentile=99.0,trim_fraction=0.1,robust_method="mad"):
+	if endmode!="all_5":
+		print("ERROR - transcript metagene currently expects endmode=all_5 so read_offset5 is well-defined.")
+		exit()
+
+	f=gzip.open(picklefile,"rb")
+	footprints=pickle.load(f)
+	print("Data loaded for "+picklefile)
+	f.close()
+
+	equalweighting=int(equalweighting)
+	genethresh=float(genethresh)
+	read_offset5=int(read_offset5)
+	aggregation_option=int(aggregation_option)
+	mean_option=int(mean_option)
+	winsor_percentile=float(winsor_percentile)
+	trim_fraction=float(trim_fraction)
+	if exclude_gene_ids is None:
+		exclude_gene_ids=set()
+
+	total_len=bins5+binscds+bins3
+	gene_vectors=[]
+	genecount=0
+
+	for gene in footprints.keys():
+		if gene=="NM_020791.2":
+			continue
+		if aggregation_option==1 and gene in exclude_gene_ids:
+			continue
+
+		ORFstart=int(footprints[gene][3])
+		UTR3start=int(footprints[gene][4])
+		counts_raw=footprints[gene][2][endmode]
+
+		if ORFstart<=0 or UTR3start<=ORFstart or UTR3start>len(counts_raw):
+			continue
+
+		counts=_shift_counts_5prime(counts_raw,read_offset5)
+		five_region=counts[:ORFstart]
+		cds_region=counts[ORFstart:UTR3start]
+		three_region=counts[UTR3start:]
+
+		if len(cds_region)==0:
+			continue
+		orf_rpkm=(sum(cds_region))/((len(cds_region))/1000.0)
+		if orf_rpkm<genethresh:
+			continue
+
+		normfactor=1.0
+		if equalweighting==1:
+			normfactor=orf_rpkm/1000.0
+			if normfactor<=0:
+				continue
+
+		vec=[]
+		vec.extend(_resample_region(five_region,bins5))
+		vec.extend(_resample_region(cds_region,binscds))
+		vec.extend(_resample_region(three_region,bins3))
+
+		vec=[x/normfactor for x in vec]
+		if aggregation_option==6:
+			vec=_robust_scale_vector(vec,robust_method)
+		gene_vectors.append(vec)
+		genecount+=1
+
+	if genecount==0:
+		print("No genes passed filters for "+picklefile)
+		return [0.0 for _ in range(total_len)]
+
+	grow=_aggregate_gene_vectors(gene_vectors,total_len,aggregation_option,mean_option,winsor_percentile,trim_fraction)
+
+	print("Genes included = "+str(genecount))
+	return grow
 
 
 
@@ -1236,5 +1622,3 @@ def dorflist_m_wrapper(txtinfile):
 	
 	
 	
-
-
