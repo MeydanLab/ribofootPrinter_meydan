@@ -3,11 +3,13 @@
 
 # Comma-separated list of .pkl.gzip files
 INPUT_picklenames
-/Users/marksjp/Documents/Codex_ribofootprinter/Example files/SM147F_25to34nt.pkl.gzip,/Users/marksjp/Documents/Codex_ribofootprinter/Example files/SM148F_25to34nt.pkl.gzip
+/Users/marksjp/Documents/Papers/AzaC/Pkls/JM011Fd_49to73nt_trim2.pkl.gzip,/Users/marksjp/Documents/Papers/AzaC/Pkls/JM012Fd_49to73nt_trim2.pkl.gzip,/Users/marksjp/Documents/Papers/AzaC/Pkls/JM013Fd_49to73nt_trim2.pkl.gzip,/Users/marksjp/Documents/Papers/AzaC/Pkls/JM014Fd_49to73nt_trim2.pkl.gzip,/Users/marksjp/Documents/Papers/AzaC/Pkls/JM015Fd_49to73nt_trim2.pkl.gzip,/Users/marksjp/Documents/Papers/AzaC/Pkls/JM016Fd_49to73nt_trim2.pkl.gzi
+
+
 
 # Output csv path (without .csv extension)
 INPUT_outfile
-/Users/marksjp/Documents/Codex_ribofootprinter/Example files/metagene_transcript_SM147F_SM148F
+/Users/marksjp/Documents/Papers/AzaC/Prism/Final/Disome_metagene
 
 # Must be all_5 (read_offset5 is defined from the 5' read end)
 INPUT_endmode
@@ -23,7 +25,7 @@ INPUT_genethresh
 
 # Shift 5' aligned reads by this many nucleotides (e.g., 13 for P-site style offset)
 INPUT_read_offset5
-13
+42
 
 # Bins for length-normalized regions
 INPUT_bins5
